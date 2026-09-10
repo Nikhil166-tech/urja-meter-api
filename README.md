@@ -149,7 +149,7 @@ urja-meter-api/
 
 ### 1. Clone & Setup Virtual Environment
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/Nikhil166-tech/urja-meter-api
 cd urja-meter-api
 
 # Create virtual environment
