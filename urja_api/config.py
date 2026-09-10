@@ -1,8 +1,10 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
 class Settings(BaseSettings):
     """Configuration settings for Urja Meter Ops Clean API."""
+    model_config = SettingsConfigDict(env_prefix="URJA_", case_sensitive=False)
+
     UPSTREAM_URL: str = Field(default="https://urja-ops.flockenergy.tech", description="Base URL of the upstream Urja portal")
     UPSTREAM_USERNAME: str = Field(default="operator@urja.local", description="Upstream operator email")
     UPSTREAM_PASSWORD: str = Field(default="urja-ops-2026", description="Upstream operator password")
@@ -18,9 +20,5 @@ class Settings(BaseSettings):
     SERVICE_NAME: str = "Urja Meter Ops Clean API"
     SERVICE_VERSION: str = "1.0.0"
     DEBUG: bool = False
-
-    class Config:
-        env_prefix = "URJA_"
-        case_sensitive = False
 
 settings = Settings()
