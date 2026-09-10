@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Urja Meter Ops — Operations Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <!-- Leaflet CSS for Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Google Fonts & Lucide Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+  <!-- Top Navigation Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="brand-badge">⚡ URJA OPS</div>
+      <div class="header-title">
+        <h1>Smart Meter Operations Center</h1>
+        <span class="sub-text">Distribution Grid Telemetry & Asset Management</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="sync-status" id="syncStatusBadge">
+        <span class="pulse-dot"></span>
+        <span id="syncStatusText">Synced</span>
+      </div>
+      <button class="btn btn-secondary btn-sm" id="btnForceSync" title="Sync with upstream portal">
+        🔄 Refresh
+      </button>
+      <a href="/docs" target="_blank" class="btn btn-outline btn-sm">Swagger UI</a>
+      <a href="/scalar" target="_blank" class="btn btn-outline btn-sm">Scalar API</a>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="dashboard-container">
+    <!-- Top Stat KPI Cards -->
+    <section class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">TOTAL SMART METERS</div>
+        <div class="kpi-val" id="kpiTotalMeters">—</div>
+        <div class="kpi-meta" id="kpiMetersMeta">Loading fleet data...</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">ACTIVE / INSTALLED</div>
+        <div class="kpi-val text-success" id="kpiInstalled">—</div>
+        <div class="kpi-meta" id="kpiInstalledPct">—% of total fleet</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">FAULTY METERS</div>
+        <div class="kpi-val text-danger" id="kpiFaulty">—</div>
+        <div class="kpi-meta" id="kpiFaultyPct">Requires inspection</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">TRANSFORMERS (DTs)</div>
+        <div class="kpi-val text-accent" id="kpiTransformers">—</div>
+        <div class="kpi-meta" id="kpiTotalCapacity">— kVA Total Cap</div>
+      </div>
+    </section>
+
+    <!-- Navigation Tabs -->
+    <nav class="view-tabs">
+      <button class="tab-btn active" data-tab="tabMap">🗺️ Geospatial Map</button>
+      <button class="tab-btn" data-tab="tabMeters">📟 Smart Meters</button>
+      <button class="tab-btn" data-tab="tabTransformers">🔌 Transformers</button>
+      <button class="tab-btn" data-tab="tabHierarchy">🌳 Network Hierarchy</button>
+      <button class="tab-btn" data-tab="tabAnalytics">📊 Grid Analytics</button>
+    </nav>
+
+    <!-- Tab 1: Map View -->
+    <section class="tab-pane active" id="tabMap">
+      <div class="map-layout">
+        <div class="map-container-wrapper">
+          <div id="map" class="map-view"></div>
+          <div class="map-legend">
+            <span class="legend-item"><span class="dot dot-installed"></span> Installed</span>
+            <span class="legend-item"><span class="dot dot-faulty"></span> Faulty</span>
+            <span class="legend-item"><span class="dot dot-decom"></span> Decommissioned</span>
+          </div>
+        </div>
+        <div class="map-sidebar">
+          <div class="sidebar-header">
+            <h3>Geospatial Proximity Search</h3>
+          </div>
+          <div class="sidebar-body">
+            <p class="text-muted text-sm">Click anywhere on the map or enter coordinates to query nearby meters via Haversine search.</p>
+            <div class="form-row">
+              <label>Latitude</label>
+              <input type="number" step="0.0001" id="geoLatInput" value="26.9124" />
+            </div>
+            <div class="form-row">
+              <label>Longitude</label>
+              <input type="number" step="0.0001" id="geoLngInput" value="75.7873" />
+            </div>
+            <div class="form-row">
+              <label>Radius (km)</label>
+              <input type="number" step="0.5" id="geoRadiusInput" value="5.0" />
+            </div>
+            <button class="btn btn-primary btn-block" id="btnSearchNearby">Search Radius</button>
+
+            <div class="nearby-results-section">
+              <div class="nearby-header">
+                <h4>Nearby Meters (<span id="nearbyCount">0</span>)</h4>
+              </div>
+              <div class="nearby-list" id="nearbyListContainer">
+                <div class="empty-state">No search executed yet.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 2: Smart Meters View -->
+    <section class="tab-pane" id="tabMeters">
+      <div class="card">
+        <div class="filters-bar">
+          <div class="search-box">
+            <input type="text" id="meterSearchInput" placeholder="🔍 Search by Meter ID, Serial, or DT Code..." />
+          </div>
+          <div class="select-filters">
+            <select id="filterStatus">
+              <option value="">All Statuses</option>
+              <option value="Installed">Installed</option>
+              <option value="Faulty">Faulty</option>
+              <option value="Decommissioned">Decommissioned</option>
+            </select>
+            <select id="filterMake">
+              <option value="">All Makes</option>
+              <option value="HPL">HPL</option>
+              <option value="Genus">Genus</option>
+              <option value="Secure">Secure</option>
+              <option value="Allied">Allied</option>
+              <option value="L&T">L&T</option>
+            </select>
+            <select id="filterPhase">
+              <option value="">All Phases</option>
+              <option value="single">Single Phase</option>
+              <option value="three">Three Phase</option>
+            </select>
+            <select id="filterInstallType">
+              <option value="">All Types</option>
+              <option value="Whole Current">Whole Current</option>
+              <option value="CT Operated">CT Operated</option>
+            </select>
+            <button class="btn btn-secondary" id="btnResetFilters">Reset</button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table" id="metersTable">
+            <thead>
+              <tr>
+                <th>Meter ID</th>
+                <th>Serial No</th>
+                <th>Make</th>
+                <th>Phase</th>
+                <th>Install Type</th>
+                <th>Status</th>
+                <th>DT Code</th>
+                <th>Feeder</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="metersTableBody">
+              <tr><td colspan="9" class="text-center py-4">Loading meters...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="pagination-bar">
+          <span class="pagination-info" id="paginationInfo">Showing 0 of 0</span>
+          <div class="pagination-controls">
+            <button class="btn btn-sm btn-outline" id="btnPrevPage">Previous</button>
+            <span id="currentPageDisplay" class="page-indicator">Page 1 of 1</span>
+            <button class="btn btn-sm btn-outline" id="btnNextPage">Next</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 3: Transformers View -->
+    <section class="tab-pane" id="tabTransformers">
+      <div class="card">
+        <div class="card-header flex-between">
+          <h2>Distribution Transformers (DTs)</h2>
+          <span class="text-muted text-sm">40 Distribution Transformers active across Jaipur Grid</span>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table" id="transformersTable">
+            <thead>
+              <tr>
+                <th>DT Code</th>
+                <th>Location / Name</th>
+                <th>Parent Feeder</th>
+                <th>Capacity (kVA)</th>
+                <th>Connected Meters</th>
+                <th>Estimated Load</th>
+                <th>Capacity Utilization</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="transformersTableBody">
+              <tr><td colspan="8" class="text-center py-4">Loading transformers...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 4: Hierarchy View -->
+    <section class="tab-pane" id="tabHierarchy">
+      <div class="card">
+        <div class="card-header">
+          <h2>7-Tier Distribution Network Explorer</h2>
+          <p class="text-muted text-sm">Zone → Circle → Division → Subdivision → Substation → Feeder → DT → Meters</p>
+        </div>
+        <div class="hierarchy-tree-container" id="hierarchyTreeContainer">
+          <div class="text-center py-4">Loading hierarchy tree...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 5: Analytics View -->
+    <section class="tab-pane" id="tabAnalytics">
+      <div class="analytics-grid">
+        <div class="card">
+          <h3>Fleet Status Breakdown</h3>
+          <div class="chart-container">
+            <canvas id="statusChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Manufacturer Make Distribution</h3>
+          <div class="chart-container">
+            <canvas id="makeChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Phase Configuration</h3>
+          <div class="chart-container">
+            <canvas id="phaseChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Installation Mechanisms</h3>
+          <div class="chart-container">
+            <canvas id="installTypeChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal: Meter Detail & Telemetry -->
+  <div class="modal-overlay" id="meterModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">
+          <h2 id="modalMeterTitle">Meter J100000</h2>
+          <span class="badge" id="modalMeterBadge">Installed</span>
+        </div>
+        <button class="modal-close" id="btnModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-tabs">
+          <button class="modal-tab-btn active" data-modaltab="modalTabTelemetry">⚡ Energy Telemetry</button>
+          <button class="modal-tab-btn" data-modaltab="modalTabSpecs">📋 Specifications & Nameplate</button>
+          <button class="modal-tab-btn" data-modaltab="modalTabHierarchy">🌳 Network Path</button>
+        </div>
+
+        <div class="modal-pane active" id="modalTabTelemetry">
+          <div class="telemetry-stats-grid">
+            <div class="stat-mini">
+              <span class="stat-mini-label">Net Consumption</span>
+              <span class="stat-mini-val text-primary" id="telemetryNetKwh">—</span>
+            </div>
+            <div class="stat-mini">
+              <span class="stat-mini-label">Avg Voltage</span>
+              <span class="stat-mini-val" id="telemetryAvgVoltage">—</span>
+            </div>
+            <div class="stat-mini">
+              <span class="stat-mini-label">Avg Power Factor</span>
+              <span class="stat-mini-val" id="telemetryAvgPf">—</span>
+            </div>
+            <div class="stat-mini">
+              <span class="stat-mini-label">Anomalies Detected</span>
+              <span class="stat-mini-val text-danger" id="telemetryAnomaliesCount">0</span>
+            </div>
+          </div>
+
+          <div class="chart-container mb-4">
+            <canvas id="telemetryChart" height="120"></canvas>
+          </div>
+
+          <div id="anomaliesListSection">
+            <h4>Grid Anomaly & Alert Log</h4>
+            <div class="anomalies-list" id="anomaliesList">
+              <div class="text-muted text-sm py-2">No anomalies detected.</div>
+            </div>
+          </div>
+
+          <h4 class="mt-4 mb-2">30-Minute Interval Readings</h4>
+          <div class="table-responsive max-h-48">
+            <table class="data-table data-table-sm" id="readingsTable">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Cumulative Active (kWh)</th>
+                  <th>Cumulative Apparent (kVAh)</th>
+                  <th>Voltage R (V)</th>
+                  <th>Power Factor</th>
+                </tr>
+              </thead>
+              <tbody id="readingsTableBody">
+                <tr><td colspan="5" class="text-center py-2">Loading readings...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="modal-pane" id="modalTabSpecs">
+          <div class="specs-grid" id="specsGrid">
+            <!-- Nameplate parameters rendered dynamically -->
+          </div>
+        </div>
+
+        <div class="modal-pane" id="modalTabHierarchy">
+          <div class="breadcrumb-trail" id="modalHierarchyPath">
+            <!-- Breadcrumbs -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
