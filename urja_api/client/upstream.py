@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
+from bs4 import BeautifulSoup
+
 from urja_api.config import settings
 from urja_api.client.exceptions import (
     UpstreamAuthError,
@@ -28,6 +30,7 @@ class UrjaUpstreamClient:
     - HMAC-SHA256 signature calculation for protected export routes using dynamic keys.
     - Robust retry logic with exponential backoff.
     - Normalization of heterogeneous meter schemas (legacy data arrays vs v2 classData JSON).
+    - BeautifulSoup HTML parsing fallback for direct SSR web pages.
     """
 
     def __init__(self, base_url: Optional[str] = None):
@@ -37,11 +40,29 @@ class UrjaUpstreamClient:
         self._session_cookie: Optional[str] = None
         self._signing_secret: Optional[str] = None
         self._signing_secret_cached_at: float = 0
-        self._lock = asyncio.Lock()
         self._client: Optional[httpx.AsyncClient] = None
+        self._client_loop = None
+        self._lock_obj: Optional[asyncio.Lock] = None
+        self._lock_loop = None
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if self._lock_obj is None or self._lock_loop != current_loop:
+            self._lock_obj = asyncio.Lock()
+            self._lock_loop = current_loop
+        return self._lock_obj
 
     async def get_http_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
+        current_loop = asyncio.get_running_loop()
+        if (
+            self._client is None
+            or self._client.is_closed
+            or self._client_loop != current_loop
+        ):
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(settings.UPSTREAM_TIMEOUT_SECONDS),
                 headers={
@@ -50,19 +71,28 @@ class UrjaUpstreamClient:
                 },
                 follow_redirects=True,
             )
+            self._client_loop = current_loop
         return self._client
 
     async def close(self):
         if self._client and not self._client.is_closed:
             await self._client.aclose()
 
-    async def login(self, force: bool = False) -> str:
+    async def login(
+        self,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        force: bool = False,
+    ) -> str:
         """
         Authenticates against SvelteKit form action at /login.
         Requires x-sveltekit-action, Origin, and Referer headers.
         """
-        async with self._lock:
-            if self._session_cookie and not force:
+        async with self.lock:
+            login_user = username or self.username
+            login_pass = password or self.password
+
+            if self._session_cookie and not force and (login_user == self.username):
                 return self._session_cookie
 
             logger.info("Authenticating with upstream Urja portal at %s/login", self.base_url)
@@ -76,8 +106,8 @@ class UrjaUpstreamClient:
                 "Accept": "application/json",
             }
             data = {
-                "email": self.username,
-                "password": self.password,
+                "email": login_user,
+                "password": login_pass,
             }
 
             try:
@@ -280,15 +310,83 @@ class UrjaUpstreamClient:
         """
         Fetches SvelteKit SSR __data.json for a meter and normalizes heterogeneous
         'legacy' ({data: [{parameterName, parameterValue}]}) vs 'v2' ({classData: "..."}) nameplates.
+        Falls back to parsing raw HTML with BeautifulSoup if __data.json is unavailable.
         """
-        resp = await self._request("GET", f"/meters/{meter_id}/__data.json")
-        if resp.status_code == 404:
+        try:
+            resp = await self._request("GET", f"/meters/{meter_id}/__data.json")
+            if resp.status_code == 200:
+                raw_json = resp.json()
+                return self._parse_sveltekit_meter_data(raw_json, meter_id)
+            elif resp.status_code == 404:
+                raise UpstreamNotFoundError("Meter", meter_id)
+        except UpstreamNotFoundError:
+            raise
+        except Exception as e:
+            logger.debug("Could not fetch __data.json for %s, falling back to HTML: %s", meter_id, e)
+
+        # Fallback to direct HTML fetching and BeautifulSoup parsing
+        resp_html = await self._request("GET", f"/meters/{meter_id}")
+        if resp_html.status_code == 404:
             raise UpstreamNotFoundError("Meter", meter_id)
-        if resp.status_code != 200:
-            raise UpstreamError(f"Failed to fetch __data.json for meter {meter_id} (status {resp.status_code})")
-        
-        raw_json = resp.json()
-        return self._parse_sveltekit_meter_data(raw_json, meter_id)
+        if resp_html.status_code == 200:
+            return self.parse_meter_html_detail(resp_html.text, meter_id)
+
+        raise UpstreamError(f"Failed to fetch detail for meter {meter_id} (status {resp_html.status_code})")
+
+    def parse_meter_html_detail(self, html_content: str, meter_id: str) -> Dict[str, Any]:
+        """
+        Parses raw HTML from /meters/{meter_id} using BeautifulSoup.
+        Extracts nameplate specification parameters from <dl> or <table> tags,
+        strips whitespace, and normalizes values.
+        """
+        soup = BeautifulSoup(html_content, "html.parser")
+        nameplate_entries = []
+
+        # 1. Parse <dl> definitions (standard Urja SvelteKit nameplate component)
+        dl = soup.find("dl")
+        if dl:
+            for div in dl.find_all("div"):
+                dt = div.find("dt")
+                dd = div.find("dd")
+                if dt and dd:
+                    p_name = dt.get_text(strip=True)
+                    p_val = dd.get_text(strip=True)
+                    if p_name and p_val:
+                        nameplate_entries.append({
+                            "parameterName": p_name,
+                            "parameterValue": p_val,
+                        })
+
+        # 2. Parse <table> rows fallback
+        if not nameplate_entries:
+            table = soup.find("table")
+            if table:
+                for row in table.find_all("tr"):
+                    cells = row.find_all(["th", "td"])
+                    if len(cells) == 2:
+                        p_name = cells[0].get_text(strip=True)
+                        p_val = cells[1].get_text(strip=True)
+                        if p_name and p_val:
+                            nameplate_entries.append({
+                                "parameterName": p_name,
+                                "parameterValue": p_val,
+                            })
+
+        # 3. Extract hierarchy breadcrumbs from nav if present
+        hierarchy_dict = {}
+        nav = soup.find("nav")
+        if nav:
+            spans = [s.get_text(strip=True) for s in nav.find_all("span") if s.get_text(strip=True)]
+            hierarchy_keys = ["Zone", "Circle", "Division", "Subdivision", "Sub Station", "Feeder", "DT"]
+            for idx, text in enumerate(spans):
+                if idx < len(hierarchy_keys):
+                    hierarchy_dict[hierarchy_keys[idx]] = text
+
+        return {
+            "meterId": meter_id,
+            "nameplate": nameplate_entries,
+            "hierarchy": hierarchy_dict,
+        }
 
     def _parse_sveltekit_meter_data(self, svelte_data: Dict[str, Any], meter_id: str) -> Dict[str, Any]:
         """
@@ -348,3 +446,20 @@ class UrjaUpstreamClient:
             "nameplate": nameplate_entries,
             "hierarchy": hierarchy_dict,
         }
+
+    # Compatibility methods matching UrjaPortalClient snippet in reference doc
+    def get_meter_details(self, meter_id: str) -> Dict[str, Any]:
+        """Synchronous/convenience wrapper matching reference doc UrjaPortalClient."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Create a separate thread or new task
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                return pool.submit(asyncio.run, self.fetch_meter_server_detail(meter_id)).result()
+        return asyncio.run(self.fetch_meter_server_detail(meter_id))
+
+
+# Canonical alias matching assignment reference doc snippet
+UrjaPortalClient = UrjaUpstreamClient
+

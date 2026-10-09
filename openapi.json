@@ -2,10 +2,108 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Urja Meter Ops Clean API",
-    "description": "\n# Urja Meter Ops Clean API\nA resilient, clean, and well-structured programmatic API gateway over the legacy **Urja Meter Ops** distribution portal.\n\n## Key Capabilities:\n- **Smart Meter Registry**: Filterable, searchable, and paginated smart meter metadata.\n- **Geospatial Proximity**: Great-circle radius searches (Haversine formula) and meter geolocation.\n- **Distribution Network Hierarchy**: Complete 7-tier electrical distribution tree (`Zone -> Circle -> Division -> Subdivision -> Substation -> Feeder -> DT -> Meter`).\n- **Distribution Transformers**: Load estimation, capacity utilization, and connected meter rollups.\n- **Telemetry & Energy Analytics**: 30-minute interval readings, consumption aggregates, voltage sag/swell detection, and power factor analysis.\n- **Resilient Upstream Gateway**: Automatic SvelteKit form authentication, HMAC-SHA256 export signing, background sync, and local caching.\n",
+    "description": "\n# Urja Meter Ops Clean API Wrapper\nA resilient, clean, and well-structured programmatic REST API wrapper over the legacy **Urja Meter Ops** distribution portal (`https://urja-ops.flockenergy.tech`).\n\n## Core Endpoints:\n- `POST /api/v1/auth/login` \u2014 Authenticate and initialize session against the legacy portal.\n- `GET /api/v1/meters` \u2014 Retrieve a filterable, paginated list of smart meters.\n- `GET /api/v1/meters/{id}` \u2014 Get comprehensive meter details with normalized nameplate specs.\n- `GET /api/v1/meters/{id}/consumption` \u2014 Get 30-minute interval telemetry consumption and grid anomaly flags.\n- `GET /api/v1/hierarchy` \u2014 Full 7-tier distribution network tree (`Zone -> Circle -> Division -> Subdivision -> Substation -> Feeder -> DT -> Meters`).\n\n## Extended Capabilities:\n- **Geospatial Proximity**: `GET /api/v1/meters/nearby` \u2014 Great-circle radius searches (Haversine formula).\n- **Distribution Transformers**: `GET /api/v1/transformers` & `GET /api/v1/transformers/{code}` \u2014 Load estimation, capacity utilization, and connected meter rollups.\n- **Fleet Analytics**: `GET /api/v1/analytics/summary` \u2014 Asset breakdowns across status, make, phase, and DT load.\n- **Operations Dashboard**: Web UI at `/` and `/dashboard` with interactive Leaflet map and Chart.js telemetry visualizations.\n",
     "version": "1.0.0"
   },
   "paths": {
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Authenticate against legacy portal (alias)",
+        "description": "Authenticates against the legacy Urja Meter Ops SvelteKit portal, establishing\na persistent session cookie (__Secure-better-auth.session_token).\nIf credentials are omitted, uses pre-configured environment credentials.",
+        "operationId": "login_endpoint_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/LoginRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Authenticate against legacy portal (v1)",
+        "description": "Authenticates against the legacy Urja Meter Ops SvelteKit portal, establishing\na persistent session cookie (__Secure-better-auth.session_token).\nIf credentials are omitted, uses pre-configured environment credentials.",
+        "operationId": "login_endpoint_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/LoginRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/health": {
       "get": {
         "tags": [
@@ -14,6 +112,26 @@
         "summary": "Service health and cache status",
         "description": "Returns service health, upstream connection state, and cache freshness.",
         "operationId": "health_check_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "tags": [
+          "System & Health"
+        ],
+        "summary": "Service health and cache status (v1)",
+        "description": "Returns service health, upstream connection state, and cache freshness.",
+        "operationId": "health_check_api_v1_health_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -46,6 +164,26 @@
         }
       }
     },
+    "/api/v1/sync": {
+      "post": {
+        "tags": [
+          "System & Health"
+        ],
+        "summary": "Trigger immediate upstream synchronization (v1)",
+        "description": "Forces an immediate re-fetch of all meters and transformers from the upstream portal.",
+        "operationId": "force_sync_api_v1_sync_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/meters": {
       "get": {
         "tags": [
@@ -54,6 +192,211 @@
         "summary": "List and filter smart meters",
         "description": "Retrieve a paginated, filterable list of smart meters.",
         "operationId": "list_meters_api_meters_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search query matching meter ID, serial number, or DT code",
+              "title": "Q"
+            },
+            "description": "Search query matching meter ID, serial number, or DT code"
+          },
+          {
+            "name": "make",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by manufacturer (HPL, Genus, Secure, Allied, L&T)",
+              "title": "Make"
+            },
+            "description": "Filter by manufacturer (HPL, Genus, Secure, Allied, L&T)"
+          },
+          {
+            "name": "phase",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by phase (single, three)",
+              "title": "Phase"
+            },
+            "description": "Filter by phase (single, three)"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by operational status (Installed, Faulty, Decommissioned)",
+              "title": "Status"
+            },
+            "description": "Filter by operational status (Installed, Faulty, Decommissioned)"
+          },
+          {
+            "name": "install_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by install type (Whole Current, CT Operated)",
+              "title": "Install Type"
+            },
+            "description": "Filter by install type (Whole Current, CT Operated)"
+          },
+          {
+            "name": "build",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by meter build version (legacy, v2)",
+              "title": "Build"
+            },
+            "description": "Filter by meter build version (legacy, v2)"
+          },
+          {
+            "name": "dt_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by Distribution Transformer code (e.g. DT-001)",
+              "title": "Dt Code"
+            },
+            "description": "Filter by Distribution Transformer code (e.g. DT-001)"
+          },
+          {
+            "name": "feeder_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by parent Feeder code (e.g. F-001)",
+              "title": "Feeder Code"
+            },
+            "description": "Filter by parent Feeder code (e.g. F-001)"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Page number (1-indexed)",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number (1-indexed)"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "Number of items per page",
+              "default": 20,
+              "title": "Page Size"
+            },
+            "description": "Number of items per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeterListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/meters": {
+      "get": {
+        "tags": [
+          "Meters"
+        ],
+        "summary": "List and filter smart meters (v1)",
+        "description": "Retrieve a paginated, filterable list of smart meters.",
+        "operationId": "list_meters_api_v1_meters_get",
         "parameters": [
           {
             "name": "q",
@@ -385,6 +728,140 @@
         }
       }
     },
+    "/api/v1/meters/nearby": {
+      "get": {
+        "tags": [
+          "Meters"
+        ],
+        "summary": "Find meters near geographic coordinates (v1)",
+        "description": "Performs great-circle geospatial radius search using the Haversine formula.",
+        "operationId": "find_nearby_meters_api_v1_meters_nearby_get",
+        "parameters": [
+          {
+            "name": "lat",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 90.0,
+              "minimum": -90.0,
+              "description": "Center latitude",
+              "examples": [
+                26.9124
+              ],
+              "title": "Lat"
+            },
+            "description": "Center latitude"
+          },
+          {
+            "name": "lng",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "number",
+              "maximum": 180.0,
+              "minimum": -180.0,
+              "description": "Center longitude",
+              "examples": [
+                75.7873
+              ],
+              "title": "Lng"
+            },
+            "description": "Center longitude"
+          },
+          {
+            "name": "radius_km",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "maximum": 500.0,
+              "exclusiveMinimum": 0,
+              "description": "Search radius in kilometers",
+              "default": 5.0,
+              "title": "Radius Km"
+            },
+            "description": "Search radius in kilometers"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "Maximum number of results to return",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Maximum number of results to return"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by status (Installed, Faulty, Decommissioned)",
+              "title": "Status"
+            },
+            "description": "Filter by status (Installed, Faulty, Decommissioned)"
+          },
+          {
+            "name": "make",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by manufacturer make",
+              "title": "Make"
+            },
+            "description": "Filter by manufacturer make"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MeterNearbyItem"
+                  },
+                  "title": "Response Find Nearby Meters Api V1 Meters Nearby Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/meters/{meter_id}": {
       "get": {
         "tags": [
@@ -428,6 +905,49 @@
         }
       }
     },
+    "/api/v1/meters/{meter_id}": {
+      "get": {
+        "tags": [
+          "Meters"
+        ],
+        "summary": "Get comprehensive meter details (v1)",
+        "description": "Retrieves unified meter details, including full 7-level distribution hierarchy and normalized nameplate.",
+        "operationId": "get_meter_api_v1_meters__meter_id__get",
+        "parameters": [
+          {
+            "name": "meter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meter Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeterDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/meters/{meter_id}/energy": {
       "get": {
         "tags": [
@@ -436,6 +956,171 @@
         "summary": "Get meter interval telemetry & anomaly analysis",
         "description": "Retrieves time-series 30-minute interval telemetry readings, computes net consumption,\ncalculates voltage metrics, and flags power quality anomalies (voltage sags, swells, spikes).",
         "operationId": "get_meter_energy_api_meters__meter_id__energy_get",
+        "parameters": [
+          {
+            "name": "meter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meter Id"
+            }
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Bypass cache and force refresh from upstream",
+              "default": false,
+              "title": "Refresh"
+            },
+            "description": "Bypass cache and force refresh from upstream"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnergyConsumptionSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meters/{meter_id}/consumption": {
+      "get": {
+        "tags": [
+          "Telemetry & Energy"
+        ],
+        "summary": "Get meter consumption history & intervals",
+        "description": "Retrieves time-series 30-minute interval telemetry readings, computes net consumption,\ncalculates voltage metrics, and flags power quality anomalies (voltage sags, swells, spikes).",
+        "operationId": "get_meter_energy_api_meters__meter_id__consumption_get",
+        "parameters": [
+          {
+            "name": "meter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meter Id"
+            }
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Bypass cache and force refresh from upstream",
+              "default": false,
+              "title": "Refresh"
+            },
+            "description": "Bypass cache and force refresh from upstream"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnergyConsumptionSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/meters/{meter_id}/energy": {
+      "get": {
+        "tags": [
+          "Telemetry & Energy"
+        ],
+        "summary": "Get meter interval telemetry & anomaly analysis (v1)",
+        "description": "Retrieves time-series 30-minute interval telemetry readings, computes net consumption,\ncalculates voltage metrics, and flags power quality anomalies (voltage sags, swells, spikes).",
+        "operationId": "get_meter_energy_api_v1_meters__meter_id__energy_get",
+        "parameters": [
+          {
+            "name": "meter_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Meter Id"
+            }
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Bypass cache and force refresh from upstream",
+              "default": false,
+              "title": "Refresh"
+            },
+            "description": "Bypass cache and force refresh from upstream"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnergyConsumptionSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/meters/{meter_id}/consumption": {
+      "get": {
+        "tags": [
+          "Telemetry & Energy"
+        ],
+        "summary": "Get meter consumption history & intervals (v1)",
+        "description": "Retrieves time-series 30-minute interval telemetry readings, computes net consumption,\ncalculates voltage metrics, and flags power quality anomalies (voltage sags, swells, spikes).",
+        "operationId": "get_meter_energy_api_v1_meters__meter_id__consumption_get",
         "parameters": [
           {
             "name": "meter_id",
@@ -539,6 +1224,62 @@
         }
       }
     },
+    "/api/v1/transformers": {
+      "get": {
+        "tags": [
+          "Transformers"
+        ],
+        "summary": "List distribution transformers (v1)",
+        "description": "Lists all Distribution Transformers with connected meter counts.",
+        "operationId": "list_transformers_api_v1_transformers_get",
+        "parameters": [
+          {
+            "name": "feeder_code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by parent Feeder code (e.g. F-001)",
+              "title": "Feeder Code"
+            },
+            "description": "Filter by parent Feeder code (e.g. F-001)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TransformerSummary"
+                  },
+                  "title": "Response List Transformers Api V1 Transformers Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/transformers/{dt_code}": {
       "get": {
         "tags": [
@@ -547,6 +1288,49 @@
         "summary": "Get transformer details, connected meters, and load utilization",
         "description": "Retrieves transformer specifications, connected meter IDs, active breakdown, and estimated capacity utilization.",
         "operationId": "get_transformer_api_transformers__dt_code__get",
+        "parameters": [
+          {
+            "name": "dt_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Dt Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransformerDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/transformers/{dt_code}": {
+      "get": {
+        "tags": [
+          "Transformers"
+        ],
+        "summary": "Get transformer details, connected meters, and load utilization (v1)",
+        "description": "Retrieves transformer specifications, connected meter IDs, active breakdown, and estimated capacity utilization.",
+        "operationId": "get_transformer_api_v1_transformers__dt_code__get",
         "parameters": [
           {
             "name": "dt_code",
@@ -604,6 +1388,28 @@
         }
       }
     },
+    "/api/v1/hierarchy": {
+      "get": {
+        "tags": [
+          "Network Hierarchy"
+        ],
+        "summary": "Get full 7-tier distribution network hierarchy tree (v1)",
+        "description": "Reconstructs the electrical network tree:\nZone -> Circle -> Division -> Subdivision -> Substation -> Feeder -> DT -> Meters.",
+        "operationId": "get_network_hierarchy_api_v1_hierarchy_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HierarchyTreeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/analytics/summary": {
       "get": {
         "tags": [
@@ -612,6 +1418,28 @@
         "summary": "Get high-level grid asset analytics and fleet breakdowns",
         "description": "Returns comprehensive asset distributions across status, manufacturer, phase, and DT loading.",
         "operationId": "get_grid_analytics_api_analytics_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GridAnalyticsSummary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analytics/summary": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Get high-level grid asset analytics and fleet breakdowns (v1)",
+        "description": "Returns comprehensive asset distributions across status, manufacturer, phase, and DT loading.",
+        "operationId": "get_grid_analytics_api_v1_analytics_summary_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1087,6 +1915,112 @@
         ],
         "title": "HierarchyTreeResponse",
         "description": "Full distribution network hierarchy tree response."
+      },
+      "LoginRequest": {
+        "properties": {
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username",
+            "description": "Username or email (defaults to configured operator)",
+            "examples": [
+              "operator@urja.local"
+            ]
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "description": "Email address (alias for username)",
+            "examples": [
+              "operator@urja.local"
+            ]
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password",
+            "description": "Password (defaults to configured secret)",
+            "examples": [
+              "urja-ops-2026"
+            ]
+          }
+        },
+        "type": "object",
+        "title": "LoginRequest",
+        "description": "User credentials for logging into the Urja Meter Ops portal."
+      },
+      "LoginResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Status string: success or error",
+            "default": "success",
+            "examples": [
+              "success"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Authentication status message",
+            "examples": [
+              "Successfully authenticated with upstream portal"
+            ]
+          },
+          "authenticated": {
+            "type": "boolean",
+            "title": "Authenticated",
+            "description": "Whether session is currently authenticated",
+            "default": true,
+            "examples": [
+              true
+            ]
+          },
+          "session_token_present": {
+            "type": "boolean",
+            "title": "Session Token Present",
+            "description": "Whether active session cookie exists",
+            "default": true,
+            "examples": [
+              true
+            ]
+          },
+          "upstream_url": {
+            "type": "string",
+            "title": "Upstream Url",
+            "description": "Upstream portal URL",
+            "examples": [
+              "https://urja-ops.flockenergy.tech"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "upstream_url"
+        ],
+        "title": "LoginResponse",
+        "description": "Authentication response with session state."
       },
       "MeterDetail": {
         "properties": {
@@ -1827,28 +2761,32 @@
   },
   "tags": [
     {
-      "name": "System & Health",
-      "description": "Cache synchronization and service health checks"
+      "name": "Authentication",
+      "description": "Authentication against legacy portal and session management"
     },
     {
       "name": "Meters",
       "description": "Smart meter lookup, filtering, detail, and geo proximity search"
     },
     {
-      "name": "Transformers",
-      "description": "Distribution transformer (DT) metrics and connected meters"
+      "name": "Telemetry & Energy",
+      "description": "Time-series energy readings, consumption history, and grid anomaly detection"
     },
     {
       "name": "Network Hierarchy",
       "description": "Electrical distribution hierarchy trees and navigation"
     },
     {
-      "name": "Telemetry & Energy",
-      "description": "Time-series energy readings and grid anomaly detection"
+      "name": "Transformers",
+      "description": "Distribution transformer (DT) metrics and connected meters"
     },
     {
       "name": "Analytics",
       "description": "High-level fleet and infrastructure aggregate summaries"
+    },
+    {
+      "name": "System & Health",
+      "description": "Cache synchronization and service health checks"
     }
   ]
 }

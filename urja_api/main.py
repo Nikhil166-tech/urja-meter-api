@@ -14,9 +14,10 @@ from urja_api.client.exceptions import (
     UpstreamNotFoundError,
     UpstreamSignatureError,
 )
-from urja_api.client.upstream import UrjaUpstreamClient
+from urja_api.client.upstream import UrjaUpstreamClient, UrjaPortalClient
 from urja_api.config import settings
 from urja_api.models.analytics import GridAnalyticsSummary
+from urja_api.models.auth import LoginRequest, LoginResponse
 from urja_api.models.energy import EnergyConsumptionSummary
 from urja_api.models.hierarchy import HierarchyTreeResponse
 from urja_api.models.meter import (
@@ -59,24 +60,30 @@ app = FastAPI(
     title=settings.SERVICE_NAME,
     version=settings.SERVICE_VERSION,
     description="""
-# Urja Meter Ops Clean API
-A resilient, clean, and well-structured programmatic API gateway over the legacy **Urja Meter Ops** distribution portal.
+# Urja Meter Ops Clean API Wrapper
+A resilient, clean, and well-structured programmatic REST API wrapper over the legacy **Urja Meter Ops** distribution portal (`https://urja-ops.flockenergy.tech`).
 
-## Key Capabilities:
-- **Smart Meter Registry**: Filterable, searchable, and paginated smart meter metadata.
-- **Geospatial Proximity**: Great-circle radius searches (Haversine formula) and meter geolocation.
-- **Distribution Network Hierarchy**: Complete 7-tier electrical distribution tree (`Zone -> Circle -> Division -> Subdivision -> Substation -> Feeder -> DT -> Meter`).
-- **Distribution Transformers**: Load estimation, capacity utilization, and connected meter rollups.
-- **Telemetry & Energy Analytics**: 30-minute interval readings, consumption aggregates, voltage sag/swell detection, and power factor analysis.
-- **Resilient Upstream Gateway**: Automatic SvelteKit form authentication, HMAC-SHA256 export signing, background sync, and local caching.
+## Core Endpoints:
+- `POST /api/v1/auth/login` — Authenticate and initialize session against the legacy portal.
+- `GET /api/v1/meters` — Retrieve a filterable, paginated list of smart meters.
+- `GET /api/v1/meters/{id}` — Get comprehensive meter details with normalized nameplate specs.
+- `GET /api/v1/meters/{id}/consumption` — Get 30-minute interval telemetry consumption and grid anomaly flags.
+- `GET /api/v1/hierarchy` — Full 7-tier distribution network tree (`Zone -> Circle -> Division -> Subdivision -> Substation -> Feeder -> DT -> Meters`).
+
+## Extended Capabilities:
+- **Geospatial Proximity**: `GET /api/v1/meters/nearby` — Great-circle radius searches (Haversine formula).
+- **Distribution Transformers**: `GET /api/v1/transformers` & `GET /api/v1/transformers/{code}` — Load estimation, capacity utilization, and connected meter rollups.
+- **Fleet Analytics**: `GET /api/v1/analytics/summary` — Asset breakdowns across status, make, phase, and DT load.
+- **Operations Dashboard**: Web UI at `/` and `/dashboard` with interactive Leaflet map and Chart.js telemetry visualizations.
 """,
     openapi_tags=[
-        {"name": "System & Health", "description": "Cache synchronization and service health checks"},
+        {"name": "Authentication", "description": "Authentication against legacy portal and session management"},
         {"name": "Meters", "description": "Smart meter lookup, filtering, detail, and geo proximity search"},
-        {"name": "Transformers", "description": "Distribution transformer (DT) metrics and connected meters"},
+        {"name": "Telemetry & Energy", "description": "Time-series energy readings, consumption history, and grid anomaly detection"},
         {"name": "Network Hierarchy", "description": "Electrical distribution hierarchy trees and navigation"},
-        {"name": "Telemetry & Energy", "description": "Time-series energy readings and grid anomaly detection"},
+        {"name": "Transformers", "description": "Distribution transformer (DT) metrics and connected meters"},
         {"name": "Analytics", "description": "High-level fleet and infrastructure aggregate summaries"},
+        {"name": "System & Health", "description": "Cache synchronization and service health checks"},
     ],
     lifespan=lifespan,
     docs_url="/docs",
@@ -120,8 +127,51 @@ if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # -------------------------------------------------------------
+# Authentication Endpoints
+# -------------------------------------------------------------
+@app.post(
+    "/api/v1/auth/login",
+    response_model=LoginResponse,
+    tags=["Authentication"],
+    summary="Authenticate against legacy portal (v1)",
+)
+@app.post(
+    "/api/auth/login",
+    response_model=LoginResponse,
+    tags=["Authentication"],
+    summary="Authenticate against legacy portal (alias)",
+)
+async def login_endpoint(payload: Optional[LoginRequest] = None):
+    """
+    Authenticates against the legacy Urja Meter Ops SvelteKit portal, establishing
+    a persistent session cookie (__Secure-better-auth.session_token).
+    If credentials are omitted, uses pre-configured environment credentials.
+    """
+    username = (payload.username or payload.email) if payload else None
+    password = payload.password if payload else None
+    try:
+        session_cookie = await upstream_client.login(username=username, password=password, force=True)
+        return LoginResponse(
+            status="success",
+            message="Successfully authenticated with upstream portal",
+            authenticated=True,
+            session_token_present=bool(session_cookie),
+            upstream_url=settings.UPSTREAM_URL,
+        )
+    except UpstreamAuthError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Authentication failed: {e.message}",
+        )
+
+# -------------------------------------------------------------
 # System & Health Endpoints
 # -------------------------------------------------------------
+@app.get(
+    "/api/v1/health",
+    tags=["System & Health"],
+    summary="Service health and cache status (v1)",
+)
 @app.get(
     "/api/health",
     tags=["System & Health"],
@@ -152,6 +202,11 @@ async def health_check():
     }
 
 @app.post(
+    "/api/v1/sync",
+    tags=["System & Health"],
+    summary="Trigger immediate upstream synchronization (v1)",
+)
+@app.post(
     "/api/sync",
     tags=["System & Health"],
     summary="Trigger immediate upstream synchronization",
@@ -164,6 +219,12 @@ async def force_sync():
 # -------------------------------------------------------------
 # Meters Endpoints
 # -------------------------------------------------------------
+@app.get(
+    "/api/v1/meters",
+    response_model=MeterListResponse,
+    tags=["Meters"],
+    summary="List and filter smart meters (v1)",
+)
 @app.get(
     "/api/meters",
     response_model=MeterListResponse,
@@ -197,6 +258,12 @@ async def list_meters(
     )
 
 @app.get(
+    "/api/v1/meters/nearby",
+    response_model=List[MeterNearbyItem],
+    tags=["Meters"],
+    summary="Find meters near geographic coordinates (v1)",
+)
+@app.get(
     "/api/meters/nearby",
     response_model=List[MeterNearbyItem],
     tags=["Meters"],
@@ -221,6 +288,12 @@ async def find_nearby_meters(
     )
 
 @app.get(
+    "/api/v1/meters/{meter_id}",
+    response_model=MeterDetail,
+    tags=["Meters"],
+    summary="Get comprehensive meter details (v1)",
+)
+@app.get(
     "/api/meters/{meter_id}",
     response_model=MeterDetail,
     tags=["Meters"],
@@ -230,6 +303,24 @@ async def get_meter(meter_id: str):
     """Retrieves unified meter details, including full 7-level distribution hierarchy and normalized nameplate."""
     return await meter_service.get_meter_by_id(meter_id)
 
+@app.get(
+    "/api/v1/meters/{meter_id}/consumption",
+    response_model=EnergyConsumptionSummary,
+    tags=["Telemetry & Energy"],
+    summary="Get meter consumption history & intervals (v1)",
+)
+@app.get(
+    "/api/v1/meters/{meter_id}/energy",
+    response_model=EnergyConsumptionSummary,
+    tags=["Telemetry & Energy"],
+    summary="Get meter interval telemetry & anomaly analysis (v1)",
+)
+@app.get(
+    "/api/meters/{meter_id}/consumption",
+    response_model=EnergyConsumptionSummary,
+    tags=["Telemetry & Energy"],
+    summary="Get meter consumption history & intervals",
+)
 @app.get(
     "/api/meters/{meter_id}/energy",
     response_model=EnergyConsumptionSummary,
@@ -252,6 +343,12 @@ async def get_meter_energy(
 # Transformers Endpoints
 # -------------------------------------------------------------
 @app.get(
+    "/api/v1/transformers",
+    response_model=List[TransformerSummary],
+    tags=["Transformers"],
+    summary="List distribution transformers (v1)",
+)
+@app.get(
     "/api/transformers",
     response_model=List[TransformerSummary],
     tags=["Transformers"],
@@ -263,6 +360,12 @@ async def list_transformers(
     """Lists all Distribution Transformers with connected meter counts."""
     return await transformer_service.list_transformers(feeder_code=feeder_code)
 
+@app.get(
+    "/api/v1/transformers/{dt_code}",
+    response_model=TransformerDetail,
+    tags=["Transformers"],
+    summary="Get transformer details, connected meters, and load utilization (v1)",
+)
 @app.get(
     "/api/transformers/{dt_code}",
     response_model=TransformerDetail,
@@ -276,6 +379,12 @@ async def get_transformer(dt_code: str):
 # -------------------------------------------------------------
 # Hierarchy Endpoints
 # -------------------------------------------------------------
+@app.get(
+    "/api/v1/hierarchy",
+    response_model=HierarchyTreeResponse,
+    tags=["Network Hierarchy"],
+    summary="Get full 7-tier distribution network hierarchy tree (v1)",
+)
 @app.get(
     "/api/hierarchy",
     response_model=HierarchyTreeResponse,
@@ -292,6 +401,12 @@ async def get_network_hierarchy():
 # -------------------------------------------------------------
 # Analytics Endpoints
 # -------------------------------------------------------------
+@app.get(
+    "/api/v1/analytics/summary",
+    response_model=GridAnalyticsSummary,
+    tags=["Analytics"],
+    summary="Get high-level grid asset analytics and fleet breakdowns (v1)",
+)
 @app.get(
     "/api/analytics/summary",
     response_model=GridAnalyticsSummary,

@@ -1,5 +1,5 @@
 import pytest
-from urja_api.client.upstream import UrjaUpstreamClient
+from urja_api.client.upstream import UrjaUpstreamClient, UrjaPortalClient
 
 def test_export_signature_generation():
     client = UrjaUpstreamClient()
@@ -38,3 +38,43 @@ def test_parse_sveltekit_meter_data():
     
     parsed = client._parse_sveltekit_meter_data(legacy_payload, "J100000")
     assert parsed["meterId"] == "J100000"
+    assert len(parsed["nameplate"]) == 1
+    assert parsed["nameplate"][0]["parameterName"] == "Make"
+    assert parsed["nameplate"][0]["parameterValue"] == "HPL"
+
+def test_parse_meter_html_detail():
+    client = UrjaUpstreamClient()
+    mock_html = """
+    <html>
+      <head><title>Meter J100000</title></head>
+      <body>
+        <nav><span>Jaipur Zone 1</span><span>Circle 1</span></nav>
+        <dl>
+          <div><dt>Serial No</dt><dd>SE33962</dd></div>
+          <div><dt>Make</dt><dd>HPL</dd></div>
+          <div><dt>Phase Type</dt><dd>single</dd></div>
+        </dl>
+      </body>
+    </html>
+    """
+    res = client.parse_meter_html_detail(mock_html, "J100000")
+    assert res["meterId"] == "J100000"
+    assert len(res["nameplate"]) == 3
+    names = [x["parameterName"] for x in res["nameplate"]]
+    vals = [x["parameterValue"] for x in res["nameplate"]]
+    assert "Serial No" in names
+    assert "SE33962" in vals
+    assert res["hierarchy"].get("Zone") == "Jaipur Zone 1"
+
+def test_urja_portal_client_alias():
+    assert UrjaPortalClient is UrjaUpstreamClient
+
+def test_app_compatibility_layer():
+    from app.main import app as app_main
+    from app.client import UrjaPortalClient as AppPortalClient
+    from app.models import MeterDetail
+    from app.config import settings as app_settings
+    assert app_main is not None
+    assert AppPortalClient is UrjaUpstreamClient
+    assert MeterDetail is not None
+    assert app_settings is not None

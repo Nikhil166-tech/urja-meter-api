@@ -22,8 +22,20 @@ class LocalDataCache:
         
         self.last_sync_timestamp: float = 0.0
         self.sync_in_progress: bool = False
-        self._lock = asyncio.Lock()
+        self._lock_obj: Optional[asyncio.Lock] = None
+        self._lock_loop = None
         self._sync_task: Optional[asyncio.Task] = None
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if self._lock_obj is None or self._lock_loop != current_loop:
+            self._lock_obj = asyncio.Lock()
+            self._lock_loop = current_loop
+        return self._lock_obj
 
     def is_stale(self) -> bool:
         """Determines if the meter & transformer cache exceeds configured TTL."""
@@ -35,7 +47,7 @@ class LocalDataCache:
         """
         Fetches full meter dataset via signed HMAC bulk export and all DTs.
         """
-        async with self._lock:
+        async with self.lock:
             if not force and not self.is_stale() and self.meters_by_id:
                 return {
                     "meters": len(self.meters_by_id),
